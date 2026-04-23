@@ -198,16 +198,69 @@ def _build_image_part(path: Path) -> dict[str, str]:
 
 
 def _extract_structured_output(response: dict[str, Any]) -> dict[str, Any] | None:
+    top_level_structured = response.get("structured")
+    if _is_decision_dict(top_level_structured):
+        return top_level_structured
+
     info = response.get("info")
     if not isinstance(info, dict):
-        return None
-    structured = info.get("structured_output")
-    if isinstance(structured, dict):
-        return structured
-    structured = info.get("structuredOutput")
-    if isinstance(structured, dict):
-        return structured
+        info = {}
+
+    for key in ("structured", "structured_output", "structuredOutput"):
+        structured = info.get(key)
+        if _is_decision_dict(structured):
+            return structured
+
+    # Some OpenCode responses return tool-call parts only, where the decision
+    # object is nested in a StructuredOutput tool call payload.
+    parts = response.get("parts")
+    if isinstance(parts, list):
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+
+            for key in ("input", "output", "state"):
+                candidate = part.get(key)
+                extracted = _extract_decision_from_unknown(candidate)
+                if extracted is not None:
+                    return extracted
+
+            state = part.get("state")
+            if isinstance(state, dict):
+                for nested_key in ("input", "output"):
+                    extracted = _extract_decision_from_unknown(state.get(nested_key))
+                    if extracted is not None:
+                        return extracted
+
     return None
+
+
+def _extract_decision_from_unknown(value: Any) -> dict[str, Any] | None:
+    if _is_decision_dict(value):
+        return value
+    if isinstance(value, dict):
+        for nested in value.values():
+            extracted = _extract_decision_from_unknown(nested)
+            if extracted is not None:
+                return extracted
+    if isinstance(value, list):
+        for item in value:
+            extracted = _extract_decision_from_unknown(item)
+            if extracted is not None:
+                return extracted
+    return None
+
+
+def _is_decision_dict(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if "needs_manual_testing" not in value or "reason" not in value:
+        return False
+    if not isinstance(value["needs_manual_testing"], bool):
+        return False
+    if not isinstance(value["reason"], str):
+        return False
+    return True
 
 
 def _extract_text_response(response: dict[str, Any]) -> str:
