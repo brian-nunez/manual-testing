@@ -145,7 +145,6 @@ def analyze_input_purposes(html: str) -> FormPurposeAnalysis:
         "wcag_input_purpose_field_count": len(scoped_fields),
         "fields_missing_autocomplete_count": len(missing_autocomplete),
         "fields_mismatched_autocomplete_count": len(mismatched_autocomplete),
-        "relevant_recommendation": len(user_fields) > 0,
         "needs_manual_testing_recommendation": len(user_fields) > 0,
         "recommendation_reason": _build_recommendation_reason(
             user_field_count=len(user_fields),
@@ -402,7 +401,6 @@ def _empty_summary() -> dict[str, Any]:
         "wcag_input_purpose_field_count": 0,
         "fields_missing_autocomplete_count": 0,
         "fields_mismatched_autocomplete_count": 0,
-        "relevant_recommendation": False,
         "needs_manual_testing_recommendation": False,
         "recommendation_reason": "No form fields detected.",
     }

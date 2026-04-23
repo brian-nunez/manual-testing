@@ -26,7 +26,6 @@ Each question returns:
 ```json
 {
   "needs_manual_testing": true,
-  "relevant": true,
   "reason": "String describing why this test applies or can be skipped"
 }
 ```

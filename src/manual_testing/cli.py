@@ -40,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--viewport-settle-ms")
 
     parser.add_argument("--llm-timeout-seconds")
+    parser.add_argument("--execution-mode", choices=["sequential", "parallel"])
+    parser.add_argument("--max-workers")
     parser.add_argument("--html-max-chars")
     parser.add_argument("--automatic-behavior-question-id")
     parser.add_argument("--automatic-behavior-timeseries-enabled", help="true/false")

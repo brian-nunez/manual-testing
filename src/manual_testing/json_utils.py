@@ -13,13 +13,10 @@ def parse_decision_response(raw_text: str) -> Decision:
     payload = _extract_json_payload(raw_text)
 
     needs_manual_testing = payload.get("needs_manual_testing")
-    relevant = payload.get("relevant")
     reason = payload.get("reason")
 
     if not isinstance(needs_manual_testing, bool):
         raise DecisionParseError("Field 'needs_manual_testing' must be boolean")
-    if not isinstance(relevant, bool):
-        raise DecisionParseError("Field 'relevant' must be boolean")
     if not isinstance(reason, str):
         raise DecisionParseError("Field 'reason' must be string")
 
@@ -29,7 +26,6 @@ def parse_decision_response(raw_text: str) -> Decision:
 
     return Decision(
         needs_manual_testing=needs_manual_testing,
-        relevant=relevant,
         reason=normalized_reason,
     )
 
@@ -37,7 +33,6 @@ def parse_decision_response(raw_text: str) -> Decision:
 def decision_fallback(reason: str) -> Decision:
     return Decision(
         needs_manual_testing=False,
-        relevant=False,
         reason=reason,
     )
 

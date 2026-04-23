@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from pathlib import Path
 
 from manual_testing.config import AppConfig
 from manual_testing.form_purpose_analyzer import analyze_input_purposes
 from manual_testing.json_utils import decision_fallback, parse_decision_response
+from manual_testing.llm.base import LLMAdapter
 from manual_testing.llm.factory import build_adapter
-from manual_testing.models import Decision, QuestionResult, RunOutput
+from manual_testing.models import Decision, ManualQuestion, QuestionResult, RunOutput
 from manual_testing.prompt_builder import build_prompt
 from manual_testing.publisher import PublishError, publish_results
 from manual_testing.question_loader import load_manual_questions
@@ -144,108 +146,17 @@ def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
 
         adapter = build_adapter(config.provider)
         logger.info("llm_adapter_ready", {"provider": config.provider, "adapter_type": type(adapter).__name__})
-        results: list[QuestionResult] = []
-
-        for question in questions:
-            question_structured_evidence = structured_evidence_by_question.get(question.question_id)
-            question_screens = _merge_unique_paths(
-                screenshots_by_question.get(question.question_id, []) + provided_screenshots
-            )
-            logger.info(
-                "question_processing_start",
-                {
-                    "question_id": question.question_id,
-                    "title": question.title,
-                    "screenshot_count": len(question_screens),
-                    "html_available": bool(html),
-                },
-            )
-
-            prompt = build_prompt(
-                question,
-                url=final_url,
-                html=html,
-                screenshot_paths=question_screens,
-                html_max_chars=config.html_max_chars,
-                structured_evidence=question_structured_evidence,
-            )
-            logger.debug(
-                "question_prompt_built",
-                {"question_id": question.question_id, "prompt_chars": len(prompt)},
-            )
-
-            try:
-                llm_failed = False
-                logger.info(
-                    "llm_generate_start",
-                    {
-                        "question_id": question.question_id,
-                        "model": config.model,
-                        "image_count": len(question_screens),
-                    },
-                )
-                raw_response = adapter.generate(
-                    prompt,
-                    model=config.model,
-                    image_paths=question_screens,
-                    timeout_seconds=config.llm_timeout_seconds,
-                )
-                logger.debug(
-                    "llm_generate_complete",
-                    {
-                        "question_id": question.question_id,
-                        "response_chars": len(raw_response),
-                    },
-                )
-                decision = parse_decision_response(raw_response)
-                error = None
-                logger.info(
-                    "decision_parsed",
-                    {
-                        "question_id": question.question_id,
-                        "relevant": decision.relevant,
-                        "needs_manual_testing": decision.needs_manual_testing,
-                    },
-                )
-            except Exception as exc:
-                llm_failed = True
-                decision = decision_fallback(f"Decision generation failed: {exc}")
-                raw_response = None
-                error = str(exc)
-                logger.error(
-                    "question_processing_error",
-                    {"question_id": question.question_id, "error": error},
-                )
-
-            decision = _apply_question_7_fallback_on_llm_error(
-                question_id=question.question_id,
-                decision=decision,
-                structured_evidence=question_structured_evidence,
-                llm_failed=llm_failed,
-                logger=logger,
-            )
-
-            results.append(
-                QuestionResult(
-                    question_id=question.question_id,
-                    title=question.title,
-                    decision=decision,
-                    prompt=prompt if config.include_prompt_in_output else None,
-                    raw_response=raw_response if config.include_raw_response else None,
-                    screenshots=[str(path) for path in question_screens],
-                    structured_evidence=question_structured_evidence,
-                    error=error,
-                )
-            )
-            logger.info(
-                "question_processing_complete",
-                {
-                    "question_id": question.question_id,
-                    "error": bool(error),
-                    "relevant": decision.relevant,
-                    "needs_manual_testing": decision.needs_manual_testing,
-                },
-            )
+        results = _process_questions(
+            questions=questions,
+            adapter=adapter,
+            config=config,
+            final_url=final_url,
+            html=html,
+            screenshots_by_question=screenshots_by_question,
+            provided_screenshots=provided_screenshots,
+            structured_evidence_by_question=structured_evidence_by_question,
+            logger=logger,
+        )
 
         run_output = RunOutput(
             run_id=config.run_id,
@@ -328,6 +239,217 @@ def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
         raise
     finally:
         logger.stop()
+
+
+def _process_questions(
+    *,
+    questions: list[ManualQuestion],
+    adapter: LLMAdapter,
+    config: AppConfig,
+    final_url: str | None,
+    html: str | None,
+    screenshots_by_question: dict[str, list[Path]],
+    provided_screenshots: list[Path],
+    structured_evidence_by_question: dict[str, dict],
+    logger: OtelLogger | NullLogger,
+) -> list[QuestionResult]:
+    total_questions = len(questions)
+    if total_questions <= 1 or config.execution_mode == "sequential":
+        logger.info(
+            "question_execution_mode",
+            {"mode": "sequential", "question_count": total_questions, "max_workers": 1},
+        )
+        return [
+            _evaluate_question(
+                question=question,
+                adapter=adapter,
+                config=config,
+                final_url=final_url,
+                html=html,
+                screenshots_by_question=screenshots_by_question,
+                provided_screenshots=provided_screenshots,
+                structured_evidence_by_question=structured_evidence_by_question,
+                logger=logger,
+            )
+            for question in questions
+        ]
+
+    worker_count = max(1, min(config.max_workers, total_questions))
+    logger.info(
+        "question_execution_mode",
+        {"mode": "parallel", "question_count": total_questions, "max_workers": worker_count},
+    )
+
+    ordered_results: list[QuestionResult | None] = [None] * total_questions
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="question-worker") as executor:
+        future_to_index = {
+            executor.submit(
+                _evaluate_question,
+                question=question,
+                adapter=adapter,
+                config=config,
+                final_url=final_url,
+                html=html,
+                screenshots_by_question=screenshots_by_question,
+                provided_screenshots=provided_screenshots,
+                structured_evidence_by_question=structured_evidence_by_question,
+                logger=logger,
+            ): index
+            for index, question in enumerate(questions)
+        }
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            question = questions[index]
+            try:
+                ordered_results[index] = future.result()
+            except Exception as exc:
+                logger.error(
+                    "question_worker_exception",
+                    {"question_id": question.question_id, "error": str(exc)},
+                )
+                ordered_results[index] = QuestionResult(
+                    question_id=question.question_id,
+                    title=question.title,
+                    decision=decision_fallback(f"Question processing failed: {exc}"),
+                    prompt=None,
+                    raw_response=None,
+                    screenshots=[],
+                    structured_evidence=structured_evidence_by_question.get(question.question_id),
+                    error=str(exc),
+                )
+
+    return [result for result in ordered_results if result is not None]
+
+
+def _evaluate_question(
+    *,
+    question: ManualQuestion,
+    adapter: LLMAdapter,
+    config: AppConfig,
+    final_url: str | None,
+    html: str | None,
+    screenshots_by_question: dict[str, list[Path]],
+    provided_screenshots: list[Path],
+    structured_evidence_by_question: dict[str, dict],
+    logger: OtelLogger | NullLogger,
+) -> QuestionResult:
+    try:
+        question_structured_evidence = structured_evidence_by_question.get(question.question_id)
+        question_screens = _merge_unique_paths(
+            screenshots_by_question.get(question.question_id, []) + provided_screenshots
+        )
+        logger.info(
+            "question_processing_start",
+            {
+                "question_id": question.question_id,
+                "title": question.title,
+                "screenshot_count": len(question_screens),
+                "html_available": bool(html),
+            },
+        )
+
+        prompt: str | None = None
+        raw_response: str | None = None
+        error: str | None = None
+        llm_failed = False
+
+        prompt = build_prompt(
+            question,
+            url=final_url,
+            html=html,
+            screenshot_paths=question_screens,
+            html_max_chars=config.html_max_chars,
+            structured_evidence=question_structured_evidence,
+        )
+        logger.debug(
+            "question_prompt_built",
+            {"question_id": question.question_id, "prompt_chars": len(prompt)},
+        )
+
+        try:
+            logger.info(
+                "llm_generate_start",
+                {
+                    "question_id": question.question_id,
+                    "model": config.model,
+                    "image_count": len(question_screens),
+                },
+            )
+            raw_response = adapter.generate(
+                prompt,
+                model=config.model,
+                image_paths=question_screens,
+                timeout_seconds=config.llm_timeout_seconds,
+            )
+            logger.debug(
+                "llm_generate_complete",
+                {
+                    "question_id": question.question_id,
+                    "response_chars": len(raw_response),
+                },
+            )
+            decision = parse_decision_response(raw_response)
+            logger.info(
+                "decision_parsed",
+                {
+                    "question_id": question.question_id,
+                    "needs_manual_testing": decision.needs_manual_testing,
+                },
+            )
+        except Exception as exc:
+            llm_failed = True
+            decision = decision_fallback(f"Decision generation failed: {exc}")
+            raw_response = None
+            error = str(exc)
+            logger.error(
+                "question_processing_error",
+                {"question_id": question.question_id, "error": error},
+            )
+
+        decision = _apply_question_7_fallback_on_llm_error(
+            question_id=question.question_id,
+            decision=decision,
+            structured_evidence=question_structured_evidence,
+            llm_failed=llm_failed,
+            logger=logger,
+        )
+
+        result = QuestionResult(
+            question_id=question.question_id,
+            title=question.title,
+            decision=decision,
+            prompt=prompt if config.include_prompt_in_output else None,
+            raw_response=raw_response if config.include_raw_response else None,
+            screenshots=[str(path) for path in question_screens],
+            structured_evidence=question_structured_evidence,
+            error=error,
+        )
+        logger.info(
+            "question_processing_complete",
+            {
+                "question_id": question.question_id,
+                "error": bool(error),
+                "needs_manual_testing": decision.needs_manual_testing,
+            },
+        )
+        return result
+
+    except Exception as exc:
+        error_message = str(exc)
+        logger.error(
+            "question_processing_unhandled_error",
+            {"question_id": question.question_id, "error": error_message},
+        )
+        return QuestionResult(
+            question_id=question.question_id,
+            title=question.title,
+            decision=decision_fallback(f"Question processing failed: {error_message}"),
+            prompt=None,
+            raw_response=None,
+            screenshots=[],
+            structured_evidence=structured_evidence_by_question.get(question.question_id),
+            error=error_message,
+        )
 
 
 def _upload_trace(
@@ -417,7 +539,7 @@ def _apply_question_7_fallback_on_llm_error(
     if user_info_field_count <= 0:
         return decision
 
-    if decision.relevant and decision.needs_manual_testing:
+    if decision.needs_manual_testing:
         return decision
 
     missing_count = int(summary.get("fields_missing_autocomplete_count", 0) or 0)
@@ -431,7 +553,6 @@ def _apply_question_7_fallback_on_llm_error(
     logger.warn(
         "question_7_llm_error_fallback_override",
         {
-            "previous_relevant": decision.relevant,
             "previous_needs_manual_testing": decision.needs_manual_testing,
             "user_info_field_count": user_info_field_count,
             "missing_autocomplete_count": missing_count,
@@ -439,7 +560,6 @@ def _apply_question_7_fallback_on_llm_error(
         },
     )
     return Decision(
-        relevant=True,
         needs_manual_testing=True,
         reason=reason,
     )

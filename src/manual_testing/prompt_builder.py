@@ -38,12 +38,13 @@ Test metadata:
 
 Task:
 - Decide whether this specific manual test should be run for this page.
-- Decide whether this test is relevant for the current page state.
 - Provide a concise reason grounded in available evidence.
 
 Evidence policy:
 - If deterministic structured evidence is provided, treat it as high-confidence extracted facts.
 - Combine deterministic evidence with HTML and screenshots to make the final decision.
+- Some test-specific text may mention the concept of relevance/applicability. Treat that as internal reasoning only.
+- Final output must NOT include a `relevant` field.
 
 Test-specific evaluation prompt:
 {question_specific_prompt}
@@ -66,6 +67,5 @@ STRICT OUTPUT INSTRUCTIONS:
 Return exactly:
 {{
   "needs_manual_testing": boolean,
-  "relevant": boolean,
   "reason": string
 }}"""

@@ -58,6 +58,8 @@ class AppConfig:
     post_load_wait_ms: int
     viewport_settle_ms: int
     llm_timeout_seconds: int
+    execution_mode: str
+    max_workers: int
     html_max_chars: int
     include_raw_response: bool
     include_prompt_in_output: bool
@@ -129,6 +131,12 @@ class AppConfig:
         post_load_wait_ms = int(_coalesce(args.post_load_wait_ms, os.getenv("POST_LOAD_WAIT_MS"), 1200))
         viewport_settle_ms = int(_coalesce(args.viewport_settle_ms, os.getenv("VIEWPORT_SETTLE_MS"), 500))
         llm_timeout_seconds = int(_coalesce(args.llm_timeout_seconds, os.getenv("LLM_TIMEOUT_SECONDS"), 90))
+        execution_mode = str(
+            _coalesce(args.execution_mode, os.getenv("EXECUTION_MODE"), "sequential")
+        ).strip().lower()
+        if execution_mode not in {"sequential", "parallel"}:
+            raise ValueError("Invalid execution mode. Use 'sequential' or 'parallel'.")
+        max_workers = max(1, int(_coalesce(args.max_workers, os.getenv("MAX_WORKERS"), 4)))
         html_max_chars = int(_coalesce(args.html_max_chars, os.getenv("HTML_MAX_CHARS"), 30000))
 
         include_raw_response = _to_bool(
@@ -247,6 +255,8 @@ class AppConfig:
             post_load_wait_ms=post_load_wait_ms,
             viewport_settle_ms=viewport_settle_ms,
             llm_timeout_seconds=llm_timeout_seconds,
+            execution_mode=execution_mode,
+            max_workers=max_workers,
             html_max_chars=html_max_chars,
             include_raw_response=include_raw_response,
             include_prompt_in_output=include_prompt_in_output,

@@ -27,13 +27,11 @@ class ManualQuestion:
 @dataclass
 class Decision:
     needs_manual_testing: bool
-    relevant: bool
     reason: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "needs_manual_testing": self.needs_manual_testing,
-            "relevant": self.relevant,
             "reason": self.reason,
         }
 
@@ -83,7 +81,6 @@ class RunOutput:
 
     def to_dict(self) -> dict[str, Any]:
         total = len(self.results)
-        relevant = sum(1 for r in self.results if r.decision.relevant)
         must_test = sum(1 for r in self.results if r.decision.needs_manual_testing)
         errors = sum(1 for r in self.results if r.error)
 
@@ -94,7 +91,6 @@ class RunOutput:
             "url": self.url,
             "summary": {
                 "total_questions": total,
-                "relevant_questions": relevant,
                 "needs_manual_testing": must_test,
                 "skippable_questions": total - must_test,
                 "errors": errors,

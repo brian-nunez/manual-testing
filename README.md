@@ -17,7 +17,6 @@ Each question returns:
 ```json
 {
   "needs_manual_testing": true,
-  "relevant": true,
   "reason": "String describing why this test applies or can be skipped"
 }
 ```
@@ -172,6 +171,8 @@ manual-testing-run --help
 Useful options:
 
 - `--question-ids question_1,question_4`
+- `--execution-mode sequential|parallel`
+- `--max-workers 4`
 - `--capture-browser true|false`
 - `--headless true|false`
 - `--navigation-timeout-ms 45000`
@@ -188,5 +189,6 @@ Useful options:
 
 - Single command invocation with explicit exit code
 - JSON output file for downstream tasks
+- Question execution mode switch: `EXECUTION_MODE=sequential|parallel` with `MAX_WORKERS` cap
 - Defensive per-question error handling (one question failing does not abort all results)
 - Optional upstream/downstream API integration through ENV-driven config
