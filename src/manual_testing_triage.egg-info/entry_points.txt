@@ -1,0 +1,2 @@
+[console_scripts]
+manual-testing-run = manual_testing.cli:main

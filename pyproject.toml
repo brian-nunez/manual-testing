@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "manual-testing-triage"
+version = "0.1.0"
+description = "WCAG manual-test triage pipeline with Playwright capture and pluggable LLM adapters"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "playwright>=1.54,<2",
+]
+
+[project.scripts]
+manual-testing-run = "manual_testing.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
