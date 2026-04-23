@@ -14,7 +14,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--run-id")
-    parser.add_argument("--provider", choices=["codex", "gemini", "llama", "ollama"])
+    parser.add_argument("--provider", choices=["codex", "gemini", "llama", "ollama", "opencode"])
     parser.add_argument("--model")
 
     parser.add_argument("--manual-list-dir")

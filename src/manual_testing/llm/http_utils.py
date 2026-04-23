@@ -20,9 +20,34 @@ def post_json(
     headers: dict[str, str],
     timeout_seconds: int,
 ) -> dict[str, Any]:
-    data = json.dumps(payload).encode("utf-8")
-    merged_headers = {"Content-Type": "application/json", **headers}
-    request = Request(url=url, data=data, headers=merged_headers, method="POST")
+    response = request_json(
+        url,
+        method="POST",
+        payload=payload,
+        headers=headers,
+        timeout_seconds=timeout_seconds,
+    )
+    if not isinstance(response, dict):
+        raise LLMHTTPError(f"Expected JSON object response from {url}, got: {type(response).__name__}")
+    return response
+
+
+def request_json(
+    url: str,
+    *,
+    method: str,
+    headers: dict[str, str],
+    timeout_seconds: int,
+    payload: dict[str, Any] | None = None,
+) -> Any:
+    method_normalized = method.strip().upper()
+    data = None
+    merged_headers = dict(headers)
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        merged_headers = {"Content-Type": "application/json", **merged_headers}
+
+    request = Request(url=url, data=data, headers=merged_headers, method=method_normalized)
 
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
@@ -32,6 +57,9 @@ def post_json(
         raise LLMHTTPError(f"{exc.code} {exc.reason}: {body}") from exc
     except URLError as exc:
         raise LLMHTTPError(f"Network error calling {url}: {exc}") from exc
+
+    if not body.strip():
+        return {}
 
     try:
         parsed = json.loads(body)

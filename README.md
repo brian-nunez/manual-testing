@@ -6,6 +6,7 @@ A minimal Python project that:
 - Uses dedicated per-question prompt instructions for all 16 tests
 - Captures page artifacts with Playwright (HTML + screenshots by viewport + trace)
 - Sends each question to a pluggable LLM adapter strategy (`codex`, `gemini`, `llama`, `ollama`)
+- Sends each question to a pluggable LLM adapter strategy (`codex`, `gemini`, `llama`, `ollama`, `opencode`)
 - Uses deterministic `selectolax` extraction for Test #7 form input-purpose evidence
 - Returns one consolidated JSON report with per-question decisions
 - Optionally publishes the report to an API (`POST`) and uploads Playwright traces to S3 path-style URLs
@@ -51,6 +52,15 @@ Adapters are selected with `--provider` (or `LLM_PROVIDER`):
 - `gemini`: Google `generateContent`
 - `llama`: OpenAI-compatible endpoint for hosted/self-hosted Llama servers
 - `ollama`: Local `OLLAMA_BASE_URL/api/generate`
+- `opencode`: OpenCode server API (`/session` + `/session/:id/message`)
+
+OpenCode adapter environment variables:
+
+- `OPENCODE_BASE_URL` (default `http://127.0.0.1:4096`)
+- `OPENCODE_PROVIDER_ID` (optional fallback provider when `--model` is not `provider/model`)
+- `OPENCODE_SERVER_USERNAME` (default `opencode`)
+- `OPENCODE_SERVER_PASSWORD` (optional; used for HTTP Basic Auth when server auth is enabled)
+- `OPENCODE_KEEP_SESSIONS` (optional; default `false`)
 
 Implementations live in:
 
