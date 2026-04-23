@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from manual_testing.models import ManualQuestion
+from manual_testing.question_prompts import get_question_prompt
 
 
 def build_prompt(
@@ -18,6 +19,7 @@ def build_prompt(
         html_excerpt = html_excerpt[:html_max_chars]
 
     screenshot_text = "\n".join(f"- {path.name}" for path in screenshot_paths) or "- No screenshots provided"
+    question_specific_prompt = get_question_prompt(question.question_id)
 
     return f"""You are an accessibility manual-testing triage assistant.
 
@@ -30,7 +32,10 @@ Manual test identifier: {question.question_id}
 Manual test title: {question.title}
 Page URL: {url or "No URL provided"}
 
-Manual Test Definition (authoritative):
+Question-specific evaluation instructions:
+{question_specific_prompt}
+
+Manual test source definition (authoritative):
 {question.body_markdown}
 
 Decision rules:

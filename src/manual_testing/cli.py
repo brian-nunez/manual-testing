@@ -41,6 +41,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--llm-timeout-seconds")
     parser.add_argument("--html-max-chars")
+    parser.add_argument("--automatic-behavior-question-id")
+    parser.add_argument("--automatic-behavior-timeseries-enabled", help="true/false")
+    parser.add_argument("--automatic-behavior-interval-ms")
+    parser.add_argument("--automatic-behavior-duration-ms")
 
     parser.add_argument("--default-viewports-json")
     parser.add_argument("--question-viewports-json")
@@ -62,6 +66,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--s3-session-token")
     parser.add_argument("--s3-key-prefix")
     parser.add_argument("--s3-method", choices=["PUT", "POST"])
+
+    parser.add_argument("--otel-logging-enabled", help="true/false")
+    parser.add_argument("--otel-collector-url")
+    parser.add_argument("--otel-service-name")
+    parser.add_argument("--otel-resource-attributes-json")
+    parser.add_argument("--otel-headers-json")
+    parser.add_argument("--otel-flush-on-each-log", help="true/false")
+    parser.add_argument("--otel-timeout-seconds")
 
     return parser
 

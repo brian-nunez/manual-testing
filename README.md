@@ -3,6 +3,7 @@
 A minimal Python project that:
 
 - Loads manual WCAG questions from `manual-list/question_*.md`
+- Uses dedicated per-question prompt instructions for all 16 tests
 - Captures page artifacts with Playwright (HTML + screenshots by viewport + trace)
 - Sends each question to a pluggable LLM adapter strategy (`codex`, `gemini`, `llama`, `ollama`)
 - Returns one consolidated JSON report with per-question decisions
@@ -57,6 +58,13 @@ Implementations live in:
 - `src/manual_testing/llm/factory.py`
 - `src/manual_testing/llm/*.py`
 
+## Per-question prompts
+
+- Prompt library: `src/manual_testing/question_prompts.py`
+- Prompt assembly: `src/manual_testing/prompt_builder.py`
+
+Each question (`question_1` ... `question_16`) has authored, test-specific instructions in addition to the source markdown definition.
+
 ## Inputs
 
 Any combination is supported:
@@ -73,7 +81,17 @@ If `--url` is provided and `--capture-browser` is true (default), Playwright:
 - captures HTML
 - captures screenshots for questions configured to require screenshots
 - resizes to question-specific viewports (with configurable defaults)
+- captures an automatic-behavior time series for `question_1` (default): every 500ms for 3000ms after load
 - always stops tracing in a `finally` block
+
+Navigation wait default is `domcontentloaded` (safer for highly dynamic sites that may never reach `networkidle`).
+
+Automatic behavior time-series settings:
+
+- `AUTOMATIC_BEHAVIOR_QUESTION_ID` (default `question_1`)
+- `AUTOMATIC_BEHAVIOR_TIMESERIES_ENABLED` (default `true`)
+- `AUTOMATIC_BEHAVIOR_INTERVAL_MS` (default `500`)
+- `AUTOMATIC_BEHAVIOR_DURATION_MS` (default `3000`)
 
 ## Viewport config
 
@@ -116,6 +134,20 @@ The uploader signs requests with AWS SigV4 and uploads the trace file using path
 
 `<endpoint>/<bucket>/<key>`
 
+## OTel logging
+
+The runner emits high-volume structured logs and can dispatch OTLP logs to a collector when feature-flagged on.
+
+Set:
+
+- `OTEL_LOGGING_ENABLED=true`
+- `OTEL_COLLECTOR_URL=http://localhost:4318/v1/logs`
+- `OTEL_SERVICE_NAME=manual-testing-triage`
+- `OTEL_RESOURCE_ATTRIBUTES_JSON='{\"deployment.environment\":\"local\"}'` (optional)
+- `OTEL_HEADERS_JSON='{\"Authorization\":\"Bearer ...\"}'` (optional)
+- `OTEL_FLUSH_ON_EACH_LOG=false` (optional)
+- `OTEL_TIMEOUT_SECONDS=10` (optional)
+
 ## CLI options
 
 ```bash
@@ -130,6 +162,10 @@ Useful options:
 - `--navigation-timeout-ms 45000`
 - `--default-viewports-json '[{"name":"desktop","width":1366,"height":768}]'`
 - `--screenshot-question-ids question_4,question_9,question_16`
+- `--automatic-behavior-interval-ms 500`
+- `--automatic-behavior-duration-ms 3000`
+- `--otel-logging-enabled true`
+- `--otel-collector-url http://localhost:4318/v1/logs`
 - `--include-raw-response true`
 - `--include-prompt-in-output true`
 

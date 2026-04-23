@@ -61,6 +61,17 @@ class AppConfig:
     html_max_chars: int
     include_raw_response: bool
     include_prompt_in_output: bool
+    automatic_behavior_question_id: str
+    automatic_behavior_timeseries_enabled: bool
+    automatic_behavior_interval_ms: int
+    automatic_behavior_duration_ms: int
+    otel_logging_enabled: bool
+    otel_collector_url: str | None
+    otel_service_name: str
+    otel_resource_attributes: dict[str, str]
+    otel_headers: dict[str, str]
+    otel_flush_on_each_log: bool
+    otel_timeout_seconds: int
     default_viewports: list[Viewport] = field(default_factory=lambda: list(DEFAULT_VIEWPORTS))
     question_viewports: dict[str, list[Viewport]] = field(default_factory=lambda: dict(DEFAULT_QUESTION_VIEWPORTS))
     screenshot_question_ids: set[str] = field(default_factory=lambda: set(DEFAULT_SCREENSHOT_QUESTION_IDS))
@@ -112,7 +123,7 @@ class AppConfig:
 
         capture_browser = _to_bool(_coalesce(args.capture_browser, os.getenv("CAPTURE_BROWSER"), "true"))
         headless = _to_bool(_coalesce(args.headless, os.getenv("PLAYWRIGHT_HEADLESS"), "true"))
-        wait_until = _coalesce(args.wait_until, os.getenv("PLAYWRIGHT_WAIT_UNTIL"), "networkidle")
+        wait_until = _coalesce(args.wait_until, os.getenv("PLAYWRIGHT_WAIT_UNTIL"), "domcontentloaded")
 
         navigation_timeout_ms = int(_coalesce(args.navigation_timeout_ms, os.getenv("NAVIGATION_TIMEOUT_MS"), 45000))
         post_load_wait_ms = int(_coalesce(args.post_load_wait_ms, os.getenv("POST_LOAD_WAIT_MS"), 1200))
@@ -125,6 +136,59 @@ class AppConfig:
         )
         include_prompt_in_output = _to_bool(
             _coalesce(args.include_prompt_in_output, os.getenv("INCLUDE_PROMPT_IN_OUTPUT"), "false")
+        )
+
+        automatic_behavior_question_id = _coalesce(
+            args.automatic_behavior_question_id,
+            os.getenv("AUTOMATIC_BEHAVIOR_QUESTION_ID"),
+            "question_1",
+        )
+        automatic_behavior_timeseries_enabled = _to_bool(
+            _coalesce(
+                args.automatic_behavior_timeseries_enabled,
+                os.getenv("AUTOMATIC_BEHAVIOR_TIMESERIES_ENABLED"),
+                "true",
+            )
+        )
+        automatic_behavior_interval_ms = int(
+            _coalesce(
+                args.automatic_behavior_interval_ms,
+                os.getenv("AUTOMATIC_BEHAVIOR_INTERVAL_MS"),
+                500,
+            )
+        )
+        automatic_behavior_duration_ms = int(
+            _coalesce(
+                args.automatic_behavior_duration_ms,
+                os.getenv("AUTOMATIC_BEHAVIOR_DURATION_MS"),
+                3000,
+            )
+        )
+
+        otel_logging_enabled = _to_bool(
+            _coalesce(args.otel_logging_enabled, os.getenv("OTEL_LOGGING_ENABLED"), "false")
+        )
+        otel_collector_url = _coalesce(args.otel_collector_url, os.getenv("OTEL_COLLECTOR_URL"), None)
+        otel_service_name = _coalesce(
+            args.otel_service_name,
+            os.getenv("OTEL_SERVICE_NAME"),
+            "manual-testing-triage",
+        )
+        otel_resource_attributes = _parse_json_object(
+            _coalesce(
+                args.otel_resource_attributes_json,
+                os.getenv("OTEL_RESOURCE_ATTRIBUTES_JSON"),
+                None,
+            )
+        )
+        otel_headers = _parse_json_object(
+            _coalesce(args.otel_headers_json, os.getenv("OTEL_HEADERS_JSON"), None)
+        )
+        otel_flush_on_each_log = _to_bool(
+            _coalesce(args.otel_flush_on_each_log, os.getenv("OTEL_FLUSH_ON_EACH_LOG"), "false")
+        )
+        otel_timeout_seconds = int(
+            _coalesce(args.otel_timeout_seconds, os.getenv("OTEL_TIMEOUT_SECONDS"), 10)
         )
 
         default_viewports = _parse_viewports(
@@ -186,6 +250,17 @@ class AppConfig:
             html_max_chars=html_max_chars,
             include_raw_response=include_raw_response,
             include_prompt_in_output=include_prompt_in_output,
+            automatic_behavior_question_id=automatic_behavior_question_id,
+            automatic_behavior_timeseries_enabled=automatic_behavior_timeseries_enabled,
+            automatic_behavior_interval_ms=automatic_behavior_interval_ms,
+            automatic_behavior_duration_ms=automatic_behavior_duration_ms,
+            otel_logging_enabled=otel_logging_enabled,
+            otel_collector_url=otel_collector_url,
+            otel_service_name=otel_service_name,
+            otel_resource_attributes=otel_resource_attributes,
+            otel_headers=otel_headers,
+            otel_flush_on_each_log=otel_flush_on_each_log,
+            otel_timeout_seconds=otel_timeout_seconds,
             default_viewports=default_viewports,
             question_viewports=question_viewports,
             screenshot_question_ids=screenshot_question_ids,
@@ -258,3 +333,12 @@ def _parse_question_viewports(
         parsed[question_id] = _parse_viewports(json.dumps(viewport_data), fallback=[])
 
     return parsed if parsed else fallback
+
+
+def _parse_json_object(raw_json: str | None) -> dict[str, str]:
+    if not raw_json:
+        return {}
+    parsed = json.loads(raw_json)
+    if not isinstance(parsed, dict):
+        raise ValueError("Expected JSON object")
+    return {str(k): str(v) for k, v in parsed.items()}
