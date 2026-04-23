@@ -4,9 +4,10 @@ import json
 from pathlib import Path
 
 from manual_testing.config import AppConfig
+from manual_testing.form_purpose_analyzer import analyze_input_purposes
 from manual_testing.json_utils import decision_fallback, parse_decision_response
 from manual_testing.llm.factory import build_adapter
-from manual_testing.models import QuestionResult, RunOutput
+from manual_testing.models import Decision, QuestionResult, RunOutput
 from manual_testing.prompt_builder import build_prompt
 from manual_testing.publisher import PublishError, publish_results
 from manual_testing.question_loader import load_manual_questions
@@ -50,6 +51,7 @@ def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
         html: str | None = None
         final_url = config.url
         trace_path: Path | None = None
+        structured_evidence_by_question: dict[str, dict] = {}
 
         screenshots_by_question: dict[str, list[Path]] = {question.question_id: [] for question in questions}
 
@@ -118,11 +120,34 @@ def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
                 "No page input available. Provide --url, --html-file, and/or --screenshot-file."
             )
 
+        question_ids = {question.question_id for question in questions}
+        if html and "question_7" in question_ids:
+            form_analysis = analyze_input_purposes(html).to_dict()
+            structured_evidence_by_question["question_7"] = {
+                "source": "selectolax_form_purpose_analyzer",
+                "analysis": form_analysis,
+            }
+            logger.info(
+                "question_7_form_analysis_ready",
+                {
+                    "parser": form_analysis.get("parser", ""),
+                    "total_fields": form_analysis.get("summary", {}).get("total_fields", 0),
+                    "user_info_field_count": form_analysis.get("summary", {}).get("user_info_field_count", 0),
+                    "missing_autocomplete_count": form_analysis.get("summary", {}).get(
+                        "fields_missing_autocomplete_count", 0
+                    ),
+                    "mismatched_autocomplete_count": form_analysis.get("summary", {}).get(
+                        "fields_mismatched_autocomplete_count", 0
+                    ),
+                },
+            )
+
         adapter = build_adapter(config.provider)
         logger.info("llm_adapter_ready", {"provider": config.provider, "adapter_type": type(adapter).__name__})
         results: list[QuestionResult] = []
 
         for question in questions:
+            question_structured_evidence = structured_evidence_by_question.get(question.question_id)
             question_screens = _merge_unique_paths(
                 screenshots_by_question.get(question.question_id, []) + provided_screenshots
             )
@@ -142,6 +167,7 @@ def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
                 html=html,
                 screenshot_paths=question_screens,
                 html_max_chars=config.html_max_chars,
+                structured_evidence=question_structured_evidence,
             )
             logger.debug(
                 "question_prompt_built",
@@ -149,6 +175,7 @@ def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
             )
 
             try:
+                llm_failed = False
                 logger.info(
                     "llm_generate_start",
                     {
@@ -181,6 +208,7 @@ def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
                     },
                 )
             except Exception as exc:
+                llm_failed = True
                 decision = decision_fallback(f"Decision generation failed: {exc}")
                 raw_response = None
                 error = str(exc)
@@ -188,6 +216,14 @@ def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
                     "question_processing_error",
                     {"question_id": question.question_id, "error": error},
                 )
+
+            decision = _apply_question_7_fallback_on_llm_error(
+                question_id=question.question_id,
+                decision=decision,
+                structured_evidence=question_structured_evidence,
+                llm_failed=llm_failed,
+                logger=logger,
+            )
 
             results.append(
                 QuestionResult(
@@ -197,6 +233,7 @@ def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
                     prompt=prompt if config.include_prompt_in_output else None,
                     raw_response=raw_response if config.include_raw_response else None,
                     screenshots=[str(path) for path in question_screens],
+                    structured_evidence=question_structured_evidence,
                     error=error,
                 )
             )
@@ -358,3 +395,51 @@ def _merge_unique_paths(paths: list[Path]) -> list[Path]:
         seen.add(resolved)
         unique.append(resolved)
     return unique
+
+
+def _apply_question_7_fallback_on_llm_error(
+    *,
+    question_id: str,
+    decision: Decision,
+    structured_evidence: dict | None,
+    llm_failed: bool,
+    logger: OtelLogger | NullLogger,
+) -> Decision:
+    if question_id != "question_7":
+        return decision
+    if not structured_evidence:
+        return decision
+    if not llm_failed:
+        return decision
+
+    summary = (structured_evidence.get("analysis") or {}).get("summary") or {}
+    user_info_field_count = int(summary.get("user_info_field_count", 0) or 0)
+    if user_info_field_count <= 0:
+        return decision
+
+    if decision.relevant and decision.needs_manual_testing:
+        return decision
+
+    missing_count = int(summary.get("fields_missing_autocomplete_count", 0) or 0)
+    mismatch_count = int(summary.get("fields_mismatched_autocomplete_count", 0) or 0)
+
+    reason = (
+        f"Overridden by deterministic form analysis: detected {user_info_field_count} user-information field(s). "
+        f"Potential autocomplete issues: missing={missing_count}, mismatch={mismatch_count}. "
+        "Manual Test #7 applies and should be run."
+    )
+    logger.warn(
+        "question_7_llm_error_fallback_override",
+        {
+            "previous_relevant": decision.relevant,
+            "previous_needs_manual_testing": decision.needs_manual_testing,
+            "user_info_field_count": user_info_field_count,
+            "missing_autocomplete_count": missing_count,
+            "mismatched_autocomplete_count": mismatch_count,
+        },
+    )
+    return Decision(
+        relevant=True,
+        needs_manual_testing=True,
+        reason=reason,
+    )

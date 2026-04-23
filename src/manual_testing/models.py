@@ -46,6 +46,7 @@ class QuestionResult:
     prompt: str | None = None
     raw_response: str | None = None
     screenshots: list[str] = field(default_factory=list)
+    structured_evidence: dict[str, Any] | None = None
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -54,6 +55,7 @@ class QuestionResult:
             "title": self.title,
             "decision": self.decision.to_dict(),
             "screenshots": self.screenshots,
+            "structured_evidence": self.structured_evidence,
             "error": self.error,
             "raw_response": self.raw_response,
             "prompt": self.prompt,

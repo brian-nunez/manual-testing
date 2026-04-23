@@ -5,13 +5,16 @@ src/manual_testing/__main__.py
 src/manual_testing/browser_capture.py
 src/manual_testing/cli.py
 src/manual_testing/config.py
+src/manual_testing/form_purpose_analyzer.py
 src/manual_testing/json_utils.py
 src/manual_testing/models.py
 src/manual_testing/prompt_builder.py
 src/manual_testing/publisher.py
 src/manual_testing/question_loader.py
+src/manual_testing/question_prompts.py
 src/manual_testing/runner.py
 src/manual_testing/s3_upload.py
+src/manual_testing/telemetry.py
 src/manual_testing/llm/__init__.py
 src/manual_testing/llm/base.py
 src/manual_testing/llm/codex_adapter.py

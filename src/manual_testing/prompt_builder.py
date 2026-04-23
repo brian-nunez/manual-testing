@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 from manual_testing.models import ManualQuestion
 from manual_testing.question_prompts import get_question_prompt
@@ -13,6 +15,7 @@ def build_prompt(
     html: str | None,
     screenshot_paths: list[Path],
     html_max_chars: int,
+    structured_evidence: dict[str, Any] | None = None,
 ) -> str:
     html_excerpt = (html or "No HTML was provided.").strip()
     if len(html_excerpt) > html_max_chars:
@@ -20,30 +23,33 @@ def build_prompt(
 
     screenshot_text = "\n".join(f"- {path.name}" for path in screenshot_paths) or "- No screenshots provided"
     question_specific_prompt = get_question_prompt(question.question_id)
+    structured_evidence_text = (
+        json.dumps(structured_evidence, indent=2)
+        if structured_evidence is not None
+        else "None"
+    )
 
     return f"""You are an accessibility manual-testing triage assistant.
 
-Goal:
-- Decide whether the user SHOULD run this manual test for the current page.
-- Decide whether the test is relevant to the current page state.
-- Explain the reason with concrete evidence from the provided inputs.
+Test metadata:
+- Manual test id: {question.question_id}
+- Manual test title: {question.title}
+- Page URL: {url or "No URL provided"}
 
-Manual test identifier: {question.question_id}
-Manual test title: {question.title}
-Page URL: {url or "No URL provided"}
+Task:
+- Decide whether this specific manual test should be run for this page.
+- Decide whether this test is relevant for the current page state.
+- Provide a concise reason grounded in available evidence.
 
-Question-specific evaluation instructions:
+Evidence policy:
+- If deterministic structured evidence is provided, treat it as high-confidence extracted facts.
+- Combine deterministic evidence with HTML and screenshots to make the final decision.
+
+Test-specific evaluation prompt:
 {question_specific_prompt}
 
-Manual test source definition (authoritative):
-{question.body_markdown}
-
-Decision rules:
-1) `relevant` is true only when this page appears to include the type of content, interaction, or condition targeted by this manual test.
-2) `needs_manual_testing` is true when the test is relevant AND a manual/human validation step is still required to verify WCAG behavior.
-3) If the test is clearly not relevant, set both `relevant=false` and `needs_manual_testing=false`.
-4) Use conservative reasoning; do not assume missing evidence.
-5) Keep `reason` concise and specific.
+Deterministic structured evidence:
+{structured_evidence_text}
 
 Available screenshot artifacts:
 {screenshot_text}

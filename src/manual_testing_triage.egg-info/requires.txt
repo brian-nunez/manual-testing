@@ -1,1 +1,2 @@
 playwright<2,>=1.54
+selectolax<1,>=0.3.23

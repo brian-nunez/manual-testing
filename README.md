@@ -6,6 +6,7 @@ A minimal Python project that:
 - Uses dedicated per-question prompt instructions for all 16 tests
 - Captures page artifacts with Playwright (HTML + screenshots by viewport + trace)
 - Sends each question to a pluggable LLM adapter strategy (`codex`, `gemini`, `llama`, `ollama`)
+- Uses deterministic `selectolax` extraction for Test #7 form input-purpose evidence
 - Returns one consolidated JSON report with per-question decisions
 - Optionally publishes the report to an API (`POST`) and uploads Playwright traces to S3 path-style URLs
 
@@ -57,6 +58,20 @@ Implementations live in:
 - `src/manual_testing/llm/base.py`
 - `src/manual_testing/llm/factory.py`
 - `src/manual_testing/llm/*.py`
+
+## Deterministic Form Analysis (#7)
+
+Test #7 includes a deterministic pre-analysis step implemented with `selectolax`:
+
+- Extracts form fields from HTML
+- Infers likely WCAG input-purpose tokens
+- Checks `autocomplete` presence and token plausibility
+- Injects structured evidence JSON into the Test #7 prompt
+- Uses deterministic fallback only if the LLM call fails (so LLM remains primary decision-maker when available)
+
+Implementation:
+
+- `src/manual_testing/form_purpose_analyzer.py`
 
 ## Per-question prompts
 
