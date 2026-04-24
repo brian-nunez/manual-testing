@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from manual_testing.llm.base import LLMAdapter
-from manual_testing.llm.http_utils import encode_image_to_base64, mime_type_for, request_json
+from manual_testing.llm.http_utils import LLMHTTPError, encode_image_to_base64, mime_type_for, request_json
 
 
 class InstancesAPIAdapter(LLMAdapter):
@@ -53,8 +53,8 @@ class InstancesAPIAdapter(LLMAdapter):
         question_id: str | None = None,
         question_title: str | None = None,
     ) -> str:
-        user_objects = _build_user_objects(
-            html=html,
+        variants = _payload_variants(
+            base_html=html,
             image_paths=image_paths,
             structured_evidence=structured_evidence,
             url=url,
@@ -64,43 +64,61 @@ class InstancesAPIAdapter(LLMAdapter):
             image_max_side=self.image_max_side,
             image_force_jpeg=self.image_force_jpeg,
         )
-        payload = {
-            "instances": [
-                {
-                    "messages": [
-                        {
-                            "content": prompt,
-                            "role": "system",
-                        },
-                        *user_objects,
-                    ],
-                    "model": model,
-                    "temperature": self.temperature,
-                    "max_tokens": self.max_tokens,
-                    "top_p": self.top_p,
-                    "top_k": self.top_k,
-                }
-            ]
-        }
 
-        headers = self._headers()
-        response = request_json(
-            self.endpoint_url,
-            method="POST",
-            payload=payload,
-            headers=headers,
-            timeout_seconds=timeout_seconds,
-        )
-        if not isinstance(response, dict):
-            raise RuntimeError(f"Unexpected instances API response type: {type(response).__name__}")
+        last_error: Exception | None = None
+        for variant_index, variant in enumerate(variants, start=1):
+            payload = {
+                "instances": [
+                    {
+                        "messages": [
+                            {
+                                "content": prompt,
+                                "role": "system",
+                            },
+                            *variant,
+                        ],
+                        "model": model,
+                        "temperature": self.temperature,
+                        "max_tokens": self.max_tokens,
+                        "top_p": self.top_p,
+                        "top_k": self.top_k,
+                    }
+                ]
+            }
 
-        message_content = _extract_message_content(response)
-        if message_content is None:
-            raise RuntimeError(f"Unexpected instances API response body: {_safe_repr(response)}")
+            try:
+                response = request_json(
+                    self.endpoint_url,
+                    method="POST",
+                    payload=payload,
+                    headers=self._headers(),
+                    timeout_seconds=timeout_seconds,
+                )
+                if not isinstance(response, dict):
+                    raise RuntimeError(f"Unexpected instances API response type: {type(response).__name__}")
 
-        if isinstance(message_content, str):
-            return message_content
-        return json.dumps(message_content)
+                message_content = _extract_message_content(response)
+                if message_content is None:
+                    raise RuntimeError(f"Unexpected instances API response body: {_safe_repr(response)}")
+
+                if isinstance(message_content, str):
+                    return message_content
+                return json.dumps(message_content)
+            except LLMHTTPError as exc:
+                last_error = exc
+                should_retry = _is_broken_pipe_error(exc) and variant_index < len(variants)
+                if should_retry:
+                    continue
+                raise
+            except Exception as exc:
+                last_error = exc
+                if variant_index < len(variants) and _is_broken_pipe_error(exc):
+                    continue
+                raise
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Instances API request failed without a captured error")
 
     def _headers(self) -> dict[str, str]:
         if not self.api_key:
@@ -231,6 +249,107 @@ def _build_user_objects(
     return messages
 
 
+def _payload_variants(
+    *,
+    base_html: str | None,
+    image_paths: Sequence[Path],
+    structured_evidence: dict[str, Any] | None,
+    url: str | None,
+    question_id: str | None,
+    question_title: str | None,
+    image_quality: int,
+    image_max_side: int,
+    image_force_jpeg: bool,
+) -> list[list[dict[str, str]]]:
+    reduced_quality = max(20, min(image_quality, 60))
+    tiny_quality = max(15, min(image_quality, 35))
+    reduced_side = min(image_max_side, 900) if image_max_side > 0 else 900
+    tiny_side = min(image_max_side, 640) if image_max_side > 0 else 640
+
+    html_a = base_html
+    html_b = _truncate_text(base_html, 8000)
+    html_c = _truncate_text(base_html, 3000)
+
+    variants = [
+        _build_user_objects(
+            html=html_a,
+            image_paths=image_paths,
+            structured_evidence=structured_evidence,
+            url=url,
+            question_id=question_id,
+            question_title=question_title,
+            image_quality=image_quality,
+            image_max_side=image_max_side,
+            image_force_jpeg=image_force_jpeg,
+        ),
+        _build_user_objects(
+            html=html_b,
+            image_paths=image_paths,
+            structured_evidence=structured_evidence,
+            url=url,
+            question_id=question_id,
+            question_title=question_title,
+            image_quality=reduced_quality,
+            image_max_side=reduced_side,
+            image_force_jpeg=image_force_jpeg,
+        ),
+        _build_user_objects(
+            html=html_c,
+            image_paths=image_paths,
+            structured_evidence=structured_evidence,
+            url=url,
+            question_id=question_id,
+            question_title=question_title,
+            image_quality=tiny_quality,
+            image_max_side=tiny_side,
+            image_force_jpeg=image_force_jpeg,
+        ),
+        _build_user_objects(
+            html=html_c,
+            image_paths=[],
+            structured_evidence=structured_evidence,
+            url=url,
+            question_id=question_id,
+            question_title=question_title,
+            image_quality=tiny_quality,
+            image_max_side=tiny_side,
+            image_force_jpeg=image_force_jpeg,
+        ),
+        _build_user_objects(
+            html=None,
+            image_paths=[],
+            structured_evidence=structured_evidence,
+            url=url,
+            question_id=question_id,
+            question_title=question_title,
+            image_quality=tiny_quality,
+            image_max_side=tiny_side,
+            image_force_jpeg=image_force_jpeg,
+        ),
+    ]
+    return _dedupe_variants(variants)
+
+
+def _truncate_text(value: str | None, max_chars: int) -> str | None:
+    if value is None:
+        return None
+    if len(value) <= max_chars:
+        return value
+    return value[:max_chars]
+
+
+def _dedupe_variants(variants: list[list[dict[str, str]]]) -> list[list[dict[str, str]]]:
+    deduped: list[list[dict[str, str]]] = []
+    seen: set[str] = set()
+    for variant in variants:
+        fingerprint = json.dumps(variant, ensure_ascii=False, sort_keys=True)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        deduped.append(variant)
+    return deduped
+
+
 def _safe_repr(value: Any, max_len: int = 1800) -> str:
     try:
         rendered = json.dumps(value, ensure_ascii=False, default=str)
@@ -349,6 +468,11 @@ def _to_bool(value: str | None, *, default: bool) -> bool:
     if not normalized:
         return default
     return normalized in {"1", "true", "yes", "on"}
+
+
+def _is_broken_pipe_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return "broken pipe" in text or "errno 32" in text
 
 
 def build_instances_api_adapter() -> InstancesAPIAdapter:
