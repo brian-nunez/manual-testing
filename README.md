@@ -5,8 +5,7 @@ A minimal Python project that:
 - Loads manual WCAG questions from `manual-list/question_*.md`
 - Uses dedicated per-question prompt instructions for all 16 tests
 - Captures page artifacts with Playwright (HTML + screenshots by viewport + trace)
-- Sends each question to a pluggable LLM adapter strategy (`codex`, `gemini`, `llama`, `ollama`)
-- Sends each question to a pluggable LLM adapter strategy (`codex`, `gemini`, `llama`, `ollama`, `opencode`)
+- Sends each question through the `instances_api` adapter (`instances[]` request + `predictions[]` response)
 - Uses deterministic `selectolax` extraction for Test #7 form input-purpose evidence
 - Returns one consolidated JSON report with per-question decisions
 - Optionally publishes the report to an API (`POST`) and uploads Playwright traces to S3 path-style URLs
@@ -34,40 +33,25 @@ python -m playwright install chromium
 ## Quick run
 
 ```bash
-export OPENAI_API_KEY="..."
+export INSTANCES_API_URL="https://your-endpoint"
+export INSTANCES_API_KEY="..."
 manual-testing-run \
-  --provider codex \
-  --model gpt-5.4-mini \
+  --provider instances_api \
+  --model llama32-90b-instruct \
   --url "https://example.com" \
   --output-dir run-artifacts
 ```
 
 The command writes a full JSON report to `run-artifacts/<run-id>/...` and prints a summary to stdout.
 
-## Generic adapter strategy
+## LLM Adapter
 
-Adapters are selected with `--provider` (or `LLM_PROVIDER`):
-
-- `codex`: OpenAI-compatible `/v1/chat/completions`
-- `gemini`: Google `generateContent`
-- `llama`: OpenAI-compatible endpoint for hosted/self-hosted Llama servers
-- `ollama`: Local `OLLAMA_BASE_URL/api/generate`
-- `opencode`: OpenCode server API (`/session` + `/session/:id/message`)
-- `instances_api`: `instances[]` request envelope with `predictions[]` response envelope
-
-OpenCode adapter environment variables:
-
-- `OPENCODE_BASE_URL` (default `http://127.0.0.1:4096`)
-- `OPENCODE_PROVIDER_ID` (optional fallback provider when `--model` is not `provider/model`)
-- `OPENCODE_SERVER_USERNAME` (default `opencode`)
-- `OPENCODE_SERVER_PASSWORD` (optional; used for HTTP Basic Auth when server auth is enabled)
-- `OPENCODE_KEEP_SESSIONS` (optional; default `false`)
+Only `instances_api` is supported.
 
 Instances API adapter environment variables:
 
 - `INSTANCES_API_URL` (required)
 - `INSTANCES_API_KEY` (optional bearer token)
-- `INSTANCES_API_SYSTEM_PROMPT` (optional)
 - `INSTANCES_API_TEMPERATURE` (default `0.1`)
 - `INSTANCES_API_MAX_TOKENS` (default `10000`)
 - `INSTANCES_API_TOP_P` (default `0.3`)

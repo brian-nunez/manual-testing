@@ -93,17 +93,11 @@ class AppConfig:
     @classmethod
     def from_sources(cls, args: Any) -> "AppConfig":
         run_id = _coalesce(args.run_id, os.getenv("RUN_ID"), str(uuid.uuid4()))
-        provider = _coalesce(args.provider, os.getenv("LLM_PROVIDER"), "codex").lower()
+        provider = _coalesce(args.provider, os.getenv("LLM_PROVIDER"), "instances_api").lower()
+        if provider != "instances_api":
+            raise ValueError("Unsupported provider. Only 'instances_api' is supported.")
 
-        default_model = {
-            "codex": "gpt-5.4-mini",
-            "gemini": "gemini-2.5-flash",
-            "llama": "meta-llama/Llama-3.2-11B-Vision-Instruct",
-            "ollama": "llama3.2-vision",
-            "opencode": "openai/gpt-5.4-mini",
-            "instances_api": "llama32-90b-instruct",
-        }.get(provider, "gpt-5.4-mini")
-        model = _coalesce(args.model, os.getenv("LLM_MODEL"), default_model)
+        model = _coalesce(args.model, os.getenv("LLM_MODEL"), "llama32-90b-instruct")
 
         manual_list_dir = Path(_coalesce(args.manual_list_dir, os.getenv("MANUAL_LIST_DIR"), "manual-list")).expanduser().resolve()
         output_dir = Path(_coalesce(args.output_dir, os.getenv("OUTPUT_DIR"), "run-artifacts")).expanduser().resolve()

@@ -356,10 +356,6 @@ def _evaluate_question(
         prompt = build_prompt(
             question,
             url=final_url,
-            html=html,
-            screenshot_paths=question_screens,
-            html_max_chars=config.html_max_chars,
-            structured_evidence=question_structured_evidence,
         )
         logger.debug(
             "question_prompt_built",
@@ -380,6 +376,11 @@ def _evaluate_question(
                 model=config.model,
                 image_paths=question_screens,
                 timeout_seconds=config.llm_timeout_seconds,
+                html=_truncate_html(html, config.html_max_chars),
+                structured_evidence=question_structured_evidence,
+                url=final_url,
+                question_id=question.question_id,
+                question_title=question.title,
             )
             logger.debug(
                 "llm_generate_complete",
@@ -517,6 +518,17 @@ def _merge_unique_paths(paths: list[Path]) -> list[Path]:
         seen.add(resolved)
         unique.append(resolved)
     return unique
+
+
+def _truncate_html(html: str | None, max_chars: int) -> str | None:
+    if html is None:
+        return None
+    normalized = html.strip()
+    if not normalized:
+        return None
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[:max_chars]
 
 
 def _apply_question_7_fallback_on_llm_error(
