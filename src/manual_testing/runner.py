@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import re
 from pathlib import Path
 
 from manual_testing.config import AppConfig
@@ -15,6 +16,16 @@ from manual_testing.publisher import PublishError, publish_results
 from manual_testing.question_loader import load_manual_questions
 from manual_testing.s3_upload import S3UploadError, upload_file_path_style
 from manual_testing.telemetry import NullLogger, OtelLogger, build_logger
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", flags=re.DOTALL)
+_HTML_HEAD_RE = re.compile(r"<head\b[^>]*>.*?</head>", flags=re.IGNORECASE | re.DOTALL)
+_HTML_NONCONTENT_TAG_RE = re.compile(
+    r"<(?:script|style|noscript|template)\b[^>]*>.*?</(?:script|style|noscript|template)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_HTML_BODY_RE = re.compile(r"<body\b[^>]*>(.*?)</body>", flags=re.IGNORECASE | re.DOTALL)
+_HTML_BETWEEN_TAG_WS_RE = re.compile(r">\s+<")
+_HTML_MULTI_WS_RE = re.compile(r"\s{2,}")
 
 
 def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
@@ -376,7 +387,7 @@ def _evaluate_question(
                 model=config.model,
                 image_paths=question_screens,
                 timeout_seconds=config.llm_timeout_seconds,
-                html=_truncate_html(html, config.html_max_chars),
+                html=_prepare_html_for_llm(html, config.html_max_chars),
                 structured_evidence=question_structured_evidence,
                 url=final_url,
                 question_id=question.question_id,
@@ -520,12 +531,27 @@ def _merge_unique_paths(paths: list[Path]) -> list[Path]:
     return unique
 
 
-def _truncate_html(html: str | None, max_chars: int) -> str | None:
+def _prepare_html_for_llm(html: str | None, max_chars: int) -> str | None:
     if html is None:
         return None
     normalized = html.strip()
     if not normalized:
         return None
+
+    # Remove obvious non-semantic/noisy sections to reduce token waste.
+    normalized = _HTML_COMMENT_RE.sub("", normalized)
+    normalized = _HTML_HEAD_RE.sub("", normalized)
+    normalized = _HTML_NONCONTENT_TAG_RE.sub("", normalized)
+
+    # Keep body content when available.
+    body_match = _HTML_BODY_RE.search(normalized)
+    if body_match:
+        normalized = body_match.group(1)
+
+    # Compact whitespace.
+    normalized = _HTML_BETWEEN_TAG_WS_RE.sub("><", normalized)
+    normalized = _HTML_MULTI_WS_RE.sub(" ", normalized).strip()
+
     if len(normalized) <= max_chars:
         return normalized
     return normalized[:max_chars]
