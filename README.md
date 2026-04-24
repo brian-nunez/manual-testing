@@ -50,7 +50,7 @@ Only `instances_api` is supported.
 
 Instances API adapter environment variables:
 
-- `INSTANCES_API_URL` (required; exact FQDN + full path endpoint. On 404, adapter retries only trailing-slash normalization of that same path)
+- `INSTANCES_API_URL` (required; exact FQDN + full path endpoint. Adapter uses this URL exactly as provided)
 - `INSTANCES_API_KEY` (optional bearer token)
 - `INSTANCES_API_TEMPERATURE` (default `0.1`)
 - `INSTANCES_API_MAX_TOKENS` (default `10000`)

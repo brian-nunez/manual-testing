@@ -5,7 +5,6 @@ import os
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Sequence
-from urllib.parse import urlsplit, urlunsplit
 
 from manual_testing.llm.base import LLMAdapter
 from manual_testing.llm.http_utils import LLMHTTPError, encode_image_to_base64, mime_type_for, request_json
@@ -27,7 +26,7 @@ class InstancesAPIAdapter(LLMAdapter):
         image_max_side: int = 1280,
         image_force_jpeg: bool = True,
     ) -> None:
-        endpoint = _normalize_endpoint_url(endpoint_url)
+        endpoint = endpoint_url
         if not endpoint:
             raise ValueError("INSTANCES_API_URL is required for the instances_api adapter")
 
@@ -65,65 +64,60 @@ class InstancesAPIAdapter(LLMAdapter):
             image_max_side=self.image_max_side,
             image_force_jpeg=self.image_force_jpeg,
         )
-        endpoints = _slash_variants(self.endpoint_url)
 
         last_error: Exception | None = None
-        for endpoint_index, endpoint in enumerate(endpoints, start=1):
-            for variant_index, variant in enumerate(variants, start=1):
-                payload = {
-                    "instances": [
-                        {
-                            "messages": [
-                                {
-                                    "content": prompt,
-                                    "role": "system",
-                                },
-                                *variant,
-                            ],
-                            "model": model,
-                            "temperature": self.temperature,
-                            "max_tokens": self.max_tokens,
-                            "top_p": self.top_p,
-                            "top_k": self.top_k,
-                        }
-                    ]
-                }
+        for variant_index, variant in enumerate(variants, start=1):
+            payload = {
+                "instances": [
+                    {
+                        "messages": [
+                            {
+                                "content": prompt,
+                                "role": "system",
+                            },
+                            *variant,
+                        ],
+                        "model": model,
+                        "temperature": self.temperature,
+                        "max_tokens": self.max_tokens,
+                        "top_p": self.top_p,
+                        "top_k": self.top_k,
+                    }
+                ]
+            }
 
-                try:
-                    response = request_json(
-                        endpoint,
-                        method="POST",
-                        payload=payload,
-                        headers=self._headers(),
-                        timeout_seconds=timeout_seconds,
-                    )
-                    if not isinstance(response, dict):
-                        raise RuntimeError(f"Unexpected instances API response type: {type(response).__name__}")
+            try:
+                response = request_json(
+                    self.endpoint_url,
+                    method="POST",
+                    payload=payload,
+                    headers=self._headers(),
+                    timeout_seconds=timeout_seconds,
+                )
+                if not isinstance(response, dict):
+                    raise RuntimeError(f"Unexpected instances API response type: {type(response).__name__}")
 
-                    message_content = _extract_message_content(response)
-                    if message_content is None:
-                        raise RuntimeError(f"Unexpected instances API response body: {_safe_repr(response)}")
+                message_content = _extract_message_content(response)
+                if message_content is None:
+                    raise RuntimeError(f"Unexpected instances API response body: {_safe_repr(response)}")
 
-                    if isinstance(message_content, str):
-                        return message_content
-                    return json.dumps(message_content)
-                except LLMHTTPError as exc:
-                    last_error = exc
-                    if _is_broken_pipe_error(exc) and variant_index < len(variants):
-                        continue
-                    if _is_404_error(exc) and endpoint_index < len(endpoints):
-                        break
-                    if _is_404_error(exc):
-                        raise RuntimeError(
-                            "Instances API returned 404. "
-                            f"Attempted INSTANCES_API_URL variants: {', '.join(endpoints)}."
-                        ) from exc
-                    raise
-                except Exception as exc:
-                    last_error = exc
-                    if variant_index < len(variants) and _is_broken_pipe_error(exc):
-                        continue
-                    raise
+                if isinstance(message_content, str):
+                    return message_content
+                return json.dumps(message_content)
+            except LLMHTTPError as exc:
+                last_error = exc
+                if _is_broken_pipe_error(exc) and variant_index < len(variants):
+                    continue
+                if _is_404_error(exc):
+                    raise RuntimeError(
+                        f"Instances API returned 404 for INSTANCES_API_URL='{self.endpoint_url}'"
+                    ) from exc
+                raise
+            except Exception as exc:
+                last_error = exc
+                if variant_index < len(variants) and _is_broken_pipe_error(exc):
+                    continue
+                raise
 
         if last_error is not None:
             raise last_error
@@ -487,37 +481,6 @@ def _is_broken_pipe_error(error: Exception) -> bool:
 def _is_404_error(error: Exception) -> bool:
     text = str(error).lower()
     return text.startswith("404 ") or " 404 " in text or "404 not found" in text
-
-
-def _normalize_endpoint_url(raw_url: str) -> str:
-    value = raw_url.strip().strip("'\"")
-    return value
-
-
-def _slash_variants(endpoint_url: str) -> list[str]:
-    split = urlsplit(endpoint_url)
-    path = split.path or "/"
-    variants: list[str] = [endpoint_url]
-
-    if path != "/" and path.endswith("/"):
-        path_alt = path.rstrip("/")
-        variants.append(
-            urlunsplit((split.scheme, split.netloc, path_alt, split.query, split.fragment))
-        )
-    elif path != "/":
-        path_alt = path + "/"
-        variants.append(
-            urlunsplit((split.scheme, split.netloc, path_alt, split.query, split.fragment))
-        )
-
-    deduped: list[str] = []
-    seen = set()
-    for candidate in variants:
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        deduped.append(candidate)
-    return deduped
 
 
 def build_instances_api_adapter() -> InstancesAPIAdapter:
