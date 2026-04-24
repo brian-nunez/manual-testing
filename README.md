@@ -50,7 +50,7 @@ Only `instances_api` is supported.
 
 Instances API adapter environment variables:
 
-- `INSTANCES_API_URL` (required)
+- `INSTANCES_API_URL` (required; must be the exact FQDN + full path endpoint that accepts `instances[]`)
 - `INSTANCES_API_KEY` (optional bearer token)
 - `INSTANCES_API_TEMPERATURE` (default `0.1`)
 - `INSTANCES_API_MAX_TOKENS` (default `10000`)

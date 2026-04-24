@@ -106,9 +106,13 @@ class InstancesAPIAdapter(LLMAdapter):
                 return json.dumps(message_content)
             except LLMHTTPError as exc:
                 last_error = exc
-                should_retry = _is_broken_pipe_error(exc) and variant_index < len(variants)
-                if should_retry:
+                if _is_broken_pipe_error(exc) and variant_index < len(variants):
                     continue
+                if _is_404_error(exc):
+                    raise RuntimeError(
+                        f"Instances API returned 404 for INSTANCES_API_URL='{self.endpoint_url}'. "
+                        "Set INSTANCES_API_URL to the exact FQDN + full path endpoint."
+                    ) from exc
                 raise
             except Exception as exc:
                 last_error = exc
@@ -473,6 +477,11 @@ def _to_bool(value: str | None, *, default: bool) -> bool:
 def _is_broken_pipe_error(error: Exception) -> bool:
     text = str(error).lower()
     return "broken pipe" in text or "errno 32" in text
+
+
+def _is_404_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return text.startswith("404 ") or " 404 " in text or "404 not found" in text
 
 
 def build_instances_api_adapter() -> InstancesAPIAdapter:
