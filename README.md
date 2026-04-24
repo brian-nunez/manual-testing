@@ -53,6 +53,7 @@ Adapters are selected with `--provider` (or `LLM_PROVIDER`):
 - `llama`: OpenAI-compatible endpoint for hosted/self-hosted Llama servers
 - `ollama`: Local `OLLAMA_BASE_URL/api/generate`
 - `opencode`: OpenCode server API (`/session` + `/session/:id/message`)
+- `instances_api`: `instances[]` request envelope with `predictions[]` response envelope
 
 OpenCode adapter environment variables:
 
@@ -61,6 +62,16 @@ OpenCode adapter environment variables:
 - `OPENCODE_SERVER_USERNAME` (default `opencode`)
 - `OPENCODE_SERVER_PASSWORD` (optional; used for HTTP Basic Auth when server auth is enabled)
 - `OPENCODE_KEEP_SESSIONS` (optional; default `false`)
+
+Instances API adapter environment variables:
+
+- `INSTANCES_API_URL` (required)
+- `INSTANCES_API_KEY` (optional bearer token)
+- `INSTANCES_API_SYSTEM_PROMPT` (optional)
+- `INSTANCES_API_TEMPERATURE` (default `0.1`)
+- `INSTANCES_API_MAX_TOKENS` (default `10000`)
+- `INSTANCES_API_TOP_P` (default `0.3`)
+- `INSTANCES_API_TOP_K` (default `8`)
 
 Implementations live in:
 

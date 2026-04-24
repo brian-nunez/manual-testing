@@ -116,7 +116,6 @@ class OpencodeAdapter(LLMAdapter):
 
         variants: list[dict[str, Any]] = []
         for model_value in model_variants:
-            # Preferred: rich parts + enforced JSON schema output.
             variants.append(
                 {
                     "model": model_value,
@@ -127,10 +126,8 @@ class OpencodeAdapter(LLMAdapter):
                     },
                 }
             )
-            # Fallback: rich parts without format in case server version does not support it.
             variants.append({"model": model_value, "parts": parts_with_images})
             if parts_with_images != text_only_parts:
-                # Final fallback for stricter server schemas that reject file parts.
                 variants.append({"model": model_value, "parts": text_only_parts})
         return variants
 
@@ -211,8 +208,6 @@ def _extract_structured_output(response: dict[str, Any]) -> dict[str, Any] | Non
         if _is_decision_dict(structured):
             return structured
 
-    # Some OpenCode responses return tool-call parts only, where the decision
-    # object is nested in a StructuredOutput tool call payload.
     parts = response.get("parts")
     if isinstance(parts, list):
         for part in parts:

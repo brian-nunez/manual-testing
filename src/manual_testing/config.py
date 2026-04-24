@@ -101,6 +101,7 @@ class AppConfig:
             "llama": "meta-llama/Llama-3.2-11B-Vision-Instruct",
             "ollama": "llama3.2-vision",
             "opencode": "openai/gpt-5.4-mini",
+            "instances_api": "llama32-90b-instruct",
         }.get(provider, "gpt-5.4-mini")
         model = _coalesce(args.model, os.getenv("LLM_MODEL"), default_model)
 
