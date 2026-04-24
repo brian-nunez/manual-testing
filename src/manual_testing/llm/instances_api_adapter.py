@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -21,6 +22,9 @@ class InstancesAPIAdapter(LLMAdapter):
         max_tokens: int = 10000,
         top_p: float = 0.3,
         top_k: int = 8,
+        image_quality: int = 70,
+        image_max_side: int = 1280,
+        image_force_jpeg: bool = True,
     ) -> None:
         endpoint = endpoint_url.strip()
         if not endpoint:
@@ -32,6 +36,9 @@ class InstancesAPIAdapter(LLMAdapter):
         self.max_tokens = int(max_tokens)
         self.top_p = float(top_p)
         self.top_k = int(top_k)
+        self.image_quality = max(1, min(int(image_quality), 95))
+        self.image_max_side = max(0, int(image_max_side))
+        self.image_force_jpeg = bool(image_force_jpeg)
 
     def generate(
         self,
@@ -53,6 +60,9 @@ class InstancesAPIAdapter(LLMAdapter):
             url=url,
             question_id=question_id,
             question_title=question_title,
+            image_quality=self.image_quality,
+            image_max_side=self.image_max_side,
+            image_force_jpeg=self.image_force_jpeg,
         )
         payload = {
             "instances": [
@@ -135,6 +145,9 @@ def _build_user_objects(
     url: str | None,
     question_id: str | None,
     question_title: str | None,
+    image_quality: int,
+    image_max_side: int,
+    image_force_jpeg: bool,
 ) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
     messages.append(
@@ -181,15 +194,22 @@ def _build_user_objects(
         )
 
     for image_path in image_paths:
+        encoded = _encode_image_for_payload(
+            image_path=image_path,
+            image_quality=image_quality,
+            image_max_side=image_max_side,
+            image_force_jpeg=image_force_jpeg,
+        )
         messages.append(
             {
                 "role": "user",
                 "content": json.dumps(
                     {
                         "type": "image",
-                        "filename": image_path.name,
-                        "mime_type": mime_type_for(image_path),
-                        "data_base64": encode_image_to_base64(image_path),
+                        "filename": encoded["filename"],
+                        "mime_type": encoded["mime_type"],
+                        "data_base64": encoded["data_base64"],
+                        "original_filename": image_path.name,
                     },
                     ensure_ascii=False,
                 ),
@@ -221,6 +241,116 @@ def _safe_repr(value: Any, max_len: int = 1800) -> str:
     return rendered[:max_len] + "...(truncated)"
 
 
+def _encode_image_for_payload(
+    *,
+    image_path: Path,
+    image_quality: int,
+    image_max_side: int,
+    image_force_jpeg: bool,
+) -> dict[str, str]:
+    try:
+        from PIL import Image  # type: ignore
+    except Exception:
+        # Fallback: send original image when Pillow is not available.
+        return {
+            "filename": image_path.name,
+            "mime_type": mime_type_for(image_path),
+            "data_base64": encode_image_to_base64(image_path),
+        }
+
+    with Image.open(image_path) as original:
+        image = original.copy()
+
+    if image_max_side > 0:
+        max_current_side = max(image.width, image.height)
+        if max_current_side > image_max_side:
+            scale = image_max_side / float(max_current_side)
+            resized_width = max(1, int(image.width * scale))
+            resized_height = max(1, int(image.height * scale))
+            image = image.resize((resized_width, resized_height), resample=Image.Resampling.LANCZOS)
+
+    if image_force_jpeg:
+        if image.mode in {"RGBA", "LA"}:
+            background = Image.new("RGB", image.size, (255, 255, 255))
+            background.paste(image, mask=image.split()[-1])
+            image = background
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
+
+        out = BytesIO()
+        image.save(
+            out,
+            format="JPEG",
+            quality=image_quality,
+            optimize=True,
+            progressive=True,
+        )
+        encoded = out.getvalue()
+        return {
+            "filename": _with_jpeg_extension(image_path.name),
+            "mime_type": "image/jpeg",
+            "data_base64": _bytes_to_b64(encoded),
+        }
+
+    out = BytesIO()
+    image_format = _normalized_image_format(image)
+    save_kwargs: dict[str, Any] = {}
+    if image_format == "JPEG":
+        if image.mode in {"RGBA", "LA"}:
+            image = image.convert("RGB")
+        save_kwargs = {"quality": image_quality, "optimize": True, "progressive": True}
+    image.save(out, format=image_format, **save_kwargs)
+    encoded = out.getvalue()
+    extension = _extension_for_format(image_format)
+    filename = image_path.name
+    if extension and not filename.lower().endswith(extension):
+        filename = f"{Path(filename).stem}{extension}"
+    return {
+        "filename": filename,
+        "mime_type": f"image/{image_format.lower()}",
+        "data_base64": _bytes_to_b64(encoded),
+    }
+
+
+def _normalized_image_format(image: Any) -> str:
+    fmt = (getattr(image, "format", None) or "PNG").upper()
+    if fmt in {"JPG", "JPEG"}:
+        return "JPEG"
+    if fmt in {"PNG", "WEBP"}:
+        return fmt
+    return "PNG"
+
+
+def _extension_for_format(image_format: str) -> str:
+    if image_format == "JPEG":
+        return ".jpg"
+    if image_format == "PNG":
+        return ".png"
+    if image_format == "WEBP":
+        return ".webp"
+    return ""
+
+
+def _with_jpeg_extension(filename: str) -> str:
+    stem = Path(filename).stem
+    return f"{stem}.jpg"
+
+
+def _bytes_to_b64(raw: bytes) -> str:
+    import base64
+
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _to_bool(value: str | None, *, default: bool) -> bool:
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if not normalized:
+        return default
+    return normalized in {"1", "true", "yes", "on"}
+
+
 def build_instances_api_adapter() -> InstancesAPIAdapter:
     return InstancesAPIAdapter(
         endpoint_url=os.getenv("INSTANCES_API_URL", ""),
@@ -229,4 +359,7 @@ def build_instances_api_adapter() -> InstancesAPIAdapter:
         max_tokens=int(os.getenv("INSTANCES_API_MAX_TOKENS", "10000")),
         top_p=float(os.getenv("INSTANCES_API_TOP_P", "0.3")),
         top_k=int(os.getenv("INSTANCES_API_TOP_K", "8")),
+        image_quality=int(os.getenv("INSTANCES_API_IMAGE_QUALITY", "70")),
+        image_max_side=int(os.getenv("INSTANCES_API_IMAGE_MAX_SIDE", "1280")),
+        image_force_jpeg=_to_bool(os.getenv("INSTANCES_API_IMAGE_FORCE_JPEG"), default=True),
     )

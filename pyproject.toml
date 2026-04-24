@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
   "playwright>=1.54,<2",
   "selectolax>=0.3.23,<1",
+  "pillow>=10,<12",
 ]
 
 [project.scripts]

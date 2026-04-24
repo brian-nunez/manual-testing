@@ -56,6 +56,9 @@ Instances API adapter environment variables:
 - `INSTANCES_API_MAX_TOKENS` (default `10000`)
 - `INSTANCES_API_TOP_P` (default `0.3`)
 - `INSTANCES_API_TOP_K` (default `8`)
+- `INSTANCES_API_IMAGE_QUALITY` (default `70`, range `1-95`)
+- `INSTANCES_API_IMAGE_MAX_SIDE` (default `1280`, longest edge in pixels; `0` disables resize)
+- `INSTANCES_API_IMAGE_FORCE_JPEG` (default `true`, converts images to JPEG for smaller payloads)
 
 Implementations live in:
 
