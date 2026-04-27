@@ -26,6 +26,69 @@ _HTML_NONCONTENT_TAG_RE = re.compile(
 _HTML_BODY_RE = re.compile(r"<body\b[^>]*>(.*?)</body>", flags=re.IGNORECASE | re.DOTALL)
 _HTML_BETWEEN_TAG_WS_RE = re.compile(r">\s+<")
 _HTML_MULTI_WS_RE = re.compile(r"\s{2,}")
+_HTML_ATTR_VALUE_RE = r"(?:\"[^\"]*\"|'[^']*'|[^\s>]+)"
+_HTML_CLASS_ATTR_RE = re.compile(rf"\sclass\s*=\s*{_HTML_ATTR_VALUE_RE}", flags=re.IGNORECASE)
+_HTML_STYLE_ATTR_RE = re.compile(rf"\sstyle\s*=\s*{_HTML_ATTR_VALUE_RE}", flags=re.IGNORECASE)
+_HTML_NOISE_ATTR_RE = re.compile(
+    rf"\s(?:data-[a-zA-Z0-9:_-]+|x-data|x-on:[a-zA-Z0-9:_-]+|"
+    rf"ng-[a-zA-Z0-9:_-]+|data-testid|data-test|data-cy|nonce|integrity|crossorigin|"
+    rf"referrerpolicy|fetchpriority|decoding|loading)\s*=\s*{_HTML_ATTR_VALUE_RE}",
+    flags=re.IGNORECASE,
+)
+_SVG_OPEN_TAG_RE = re.compile(
+    r"<(?P<tag>"
+    r"svg|path|g|defs|symbol|use|circle|ellipse|line|polyline|polygon|rect|"
+    r"text|tspan|clipPath|mask|pattern|marker|linearGradient|radialGradient|stop|"
+    r"filter|fe[a-zA-Z]+"
+    r")(?P<attrs>\s[^>]*)?>",
+    flags=re.IGNORECASE,
+)
+_SVG_DROP_ATTR_NAMES = {
+    "class",
+    "style",
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "stroke",
+    "stroke-width",
+    "stroke-opacity",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "opacity",
+    "transform",
+    "filter",
+    "mask",
+    "clip-path",
+    "clip-rule",
+    "d",
+    "points",
+    "x",
+    "y",
+    "x1",
+    "y1",
+    "x2",
+    "y2",
+    "cx",
+    "cy",
+    "r",
+    "rx",
+    "ry",
+    "width",
+    "height",
+    "viewbox",
+    "preserveaspectratio",
+    "xmlns",
+    "xmlns:xlink",
+    "href",
+    "xlink:href",
+}
+_SVG_ATTR_RE = re.compile(
+    r"(?P<space>\s+)(?P<name>[a-zA-Z_:][a-zA-Z0-9:_.-]*)\s*=\s*"
+    r"(?P<value>\"[^\"]*\"|'[^']*'|[^\s>]+)"
+)
 
 
 def run_pipeline(config: AppConfig) -> tuple[RunOutput, Path]:
@@ -542,6 +605,8 @@ def _prepare_html_for_llm(html: str | None, max_chars: int) -> str | None:
     normalized = _HTML_COMMENT_RE.sub("", normalized)
     normalized = _HTML_HEAD_RE.sub("", normalized)
     normalized = _HTML_NONCONTENT_TAG_RE.sub("", normalized)
+    normalized = _strip_global_noise_attributes(normalized)
+    normalized = _strip_svg_noise_attributes(normalized)
 
     # Keep body content when available.
     body_match = _HTML_BODY_RE.search(normalized)
@@ -555,6 +620,42 @@ def _prepare_html_for_llm(html: str | None, max_chars: int) -> str | None:
     if len(normalized) <= max_chars:
         return normalized
     return normalized[:max_chars]
+
+
+def _strip_global_noise_attributes(html: str) -> str:
+    cleaned = _HTML_CLASS_ATTR_RE.sub("", html)
+    cleaned = _HTML_STYLE_ATTR_RE.sub("", cleaned)
+    cleaned = _HTML_NOISE_ATTR_RE.sub("", cleaned)
+    return cleaned
+
+
+def _strip_svg_noise_attributes(html: str) -> str:
+    def _replace_tag(match: re.Match[str]) -> str:
+        tag = match.group("tag")
+        attrs = match.group("attrs") or ""
+        sanitized_attrs = _strip_svg_attrs(attrs)
+        return f"<{tag}{sanitized_attrs}>"
+
+    return _SVG_OPEN_TAG_RE.sub(_replace_tag, html)
+
+
+def _strip_svg_attrs(attrs: str) -> str:
+    if not attrs:
+        return ""
+
+    def _drop_attr(match: re.Match[str]) -> str:
+        name = match.group("name").lower()
+        if name in _SVG_DROP_ATTR_NAMES:
+            return ""
+        if name.startswith("data-"):
+            return ""
+        return match.group(0)
+
+    cleaned = _SVG_ATTR_RE.sub(_drop_attr, attrs)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    if not cleaned:
+        return ""
+    return f" {cleaned}"
 
 
 def _apply_question_7_fallback_on_llm_error(
